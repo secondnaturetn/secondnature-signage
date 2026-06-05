@@ -133,6 +133,7 @@
             color: #333;
             font-size: 14px;
             font-weight: 500;
+            overflow-wrap: anywhere;
         }
 
         .driver-info {
@@ -199,15 +200,6 @@
     </div>
 
     <script>
-        const API_BASE_URL = 'https://api.gpsinsight.com/v2';
-        
-        // GPS Insight Credentials
-        const credentials = {
-            token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1lIjoic2Vjb25kbmF0dXJlbGNncHMiLCJBY2NvdW50SWQiOiI3MzU1IiwiQWN0aXZlIjp0cnVlLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9oYXNoIjoiZjA5MDU4MjJmYzBhY2NlZTI0MzQxNTc5YzBkMDlmMTUiLCJodHRwOi8vc2NoZW1hcy5taWNyb3NvZnQuY29tL3dzLzIwMDgvMDYvaWRlbnRpdHkvY2xhaW1zL3JvbGUiOiJBZG1pbiIsIm5iZiI6MTcxNzYwMDAwMCwiZXhwIjoxNzQ5MTM2MDAwLCJpYXQiOjE3MTc2MDAwMDB9.d8LyRiLqR3LqR3LqR3LqR3LqR3LqR3LqR3LqR3LqR3L',
-            username: 'secondnaturelcgps',
-            password: 'PreAmp12ax72!!'
-        };
-
         async function fetchVehicles() {
             const loadingContainer = document.getElementById('loadingContainer');
             const errorContainer = document.getElementById('errorContainer');
@@ -220,25 +212,14 @@
             refreshBtn.disabled = true;
 
             try {
-                if (!credentials.token) {
-                    throw new Error('GPS Insight credentials not configured.');
-                }
-
-                // Fetch vehicles from GPS Insight API
-                const response = await fetch(`${API_BASE_URL}/vehicles`, {
-                    method: 'GET',
-                    headers: {
-                        'Authorization': `Bearer ${credentials.token}`,
-                        'Content-Type': 'application/json'
-                    }
-                });
+                const response = await fetch('/api/vehicles');
+                const data = await response.json();
 
                 if (!response.ok) {
-                    throw new Error(`API Error: ${response.status} ${response.statusText}`);
+                    throw new Error(data.error || `API Error: ${response.status} ${response.statusText}`);
                 }
 
-                const data = await response.json();
-                const vehicles = data.data || [];
+                const vehicles = normalizeVehicles(data.vehicles);
 
                 loadingContainer.style.display = 'none';
 
@@ -247,42 +228,35 @@
                     return;
                 }
 
-                // Fetch additional details for each vehicle
-                const vehiclesWithDetails = await Promise.all(
-                    vehicles.map(vehicle => fetchVehicleDetails(vehicle))
-                );
-
-                displayVehicles(vehiclesWithDetails);
-                updateLastRefreshed();
-
+                displayVehicles(vehicles);
+                updateLastRefreshed(data.updatedAt);
             } catch (error) {
                 console.error('Error fetching vehicles:', error);
                 loadingContainer.style.display = 'none';
-                errorContainer.innerHTML = `<div class="error">⚠️ Error loading vehicles: ${error.message}</div>`;
+                errorContainer.innerHTML = `<div class="error">⚠️ Error loading vehicles: ${escapeHtml(error.message)}</div>`;
             } finally {
                 refreshBtn.disabled = false;
             }
         }
 
-        async function fetchVehicleDetails(vehicle) {
-            try {
-                const response = await fetch(`${API_BASE_URL}/vehicles/${vehicle.id}`, {
-                    method: 'GET',
-                    headers: {
-                        'Authorization': `Bearer ${credentials.token}`,
-                        'Content-Type': 'application/json'
-                    }
-                });
-
-                if (response.ok) {
-                    const details = await response.json();
-                    return { ...vehicle, ...details.data };
-                }
-                return vehicle;
-            } catch (error) {
-                console.error(`Error fetching details for vehicle ${vehicle.id}:`, error);
-                return vehicle;
+        function normalizeVehicles(payload) {
+            if (Array.isArray(payload)) {
+                return payload;
             }
+
+            if (Array.isArray(payload?.data)) {
+                return payload.data;
+            }
+
+            if (Array.isArray(payload?.vehicles)) {
+                return payload.vehicles;
+            }
+
+            if (payload && typeof payload === 'object') {
+                return [payload];
+            }
+
+            return [];
         }
 
         function displayVehicles(vehicles) {
@@ -306,35 +280,40 @@
 
             const location = vehicle.location || {};
             const driver = vehicle.driver || {};
-            const lastCheckIn = vehicle.last_checkin_time ? new Date(vehicle.last_checkin_time) : null;
-            const arrived = vehicle.arrived_time ? new Date(vehicle.arrived_time) : null;
+            const lastCheckIn = vehicle.last_checkin_time || vehicle.lastCheckIn ? new Date(vehicle.last_checkin_time || vehicle.lastCheckIn) : null;
+            const arrived = vehicle.arrived_time || vehicle.arrivedTime ? new Date(vehicle.arrived_time || vehicle.arrivedTime) : null;
 
             const formatTime = (date) => {
-                if (!date) return 'N/A';
+                if (!date || Number.isNaN(date.getTime())) return 'N/A';
                 return date.toLocaleString();
             };
 
             const driverStatus = driver.id ? 'Signed In' : 'Not Signed In';
             const driverStatusClass = driver.id ? 'status-online' : 'status-offline';
+            const vehicleName = vehicle.name || vehicle.label || vehicle.plate_number || vehicle.plateNumber || 'Unknown Vehicle';
+            const plateNumber = vehicle.plate_number || vehicle.plateNumber || vehicle.license_plate || vehicle.licensePlate || 'N/A';
+            const vehicleId = vehicle.id || vehicle.vehicle_id || vehicle.vehicleId || 'N/A';
+            const latitude = location.latitude || vehicle.latitude || vehicle.lat || 'N/A';
+            const longitude = location.longitude || vehicle.longitude || vehicle.lon || vehicle.lng || 'N/A';
 
             card.innerHTML = `
-                <h2>${vehicle.name || vehicle.plate_number || 'Unknown Vehicle'}</h2>
+                <h2>${escapeHtml(vehicleName)}</h2>
                 <div class="vehicle-info">
                     <div class="info-item">
                         <div class="info-label">License Plate</div>
-                        <div class="info-value">${vehicle.plate_number || 'N/A'}</div>
+                        <div class="info-value">${escapeHtml(plateNumber)}</div>
                     </div>
                     <div class="info-item">
                         <div class="info-label">Vehicle ID</div>
-                        <div class="info-value">${vehicle.id || 'N/A'}</div>
+                        <div class="info-value">${escapeHtml(vehicleId)}</div>
                     </div>
                     <div class="info-item">
                         <div class="info-label">Latitude</div>
-                        <div class="info-value">${location.latitude || 'N/A'}</div>
+                        <div class="info-value">${escapeHtml(latitude)}</div>
                     </div>
                     <div class="info-item">
                         <div class="info-label">Longitude</div>
-                        <div class="info-value">${location.longitude || 'N/A'}</div>
+                        <div class="info-value">${escapeHtml(longitude)}</div>
                     </div>
                     <div class="info-item">
                         <div class="info-label">Arrived</div>
@@ -349,7 +328,7 @@
                         <div class="info-value"><span class="${driverStatusClass}">${driverStatus}</span></div>
                         ${driver.id ? `
                             <div class="info-label" style="margin-top: 8px;">Driver ID / Keyfob</div>
-                            <div class="info-value">${driver.id}</div>
+                            <div class="info-value">${escapeHtml(driver.id)}</div>
                         ` : ''}
                     </div>
                 </div>
@@ -358,18 +337,22 @@
             return card;
         }
 
-        function updateLastRefreshed() {
-            const now = new Date();
-            document.getElementById('lastUpdated').textContent = `Last updated: ${now.toLocaleTimeString()}`;
+        function escapeHtml(value) {
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
         }
 
-        // Event listeners
+        function updateLastRefreshed(updatedAt) {
+            const date = updatedAt ? new Date(updatedAt) : new Date();
+            document.getElementById('lastUpdated').textContent = `Last updated: ${date.toLocaleTimeString()}`;
+        }
+
         document.getElementById('refreshBtn').addEventListener('click', fetchVehicles);
-
-        // Initial load
         window.addEventListener('load', fetchVehicles);
-
-        // Auto-refresh every 5 minutes
         setInterval(fetchVehicles, 5 * 60 * 1000);
     </script>
 </body>
