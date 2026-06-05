@@ -1,0 +1,14 @@
+node_modules/
+.DS_Store
+.env
+.env.local
+local.settings.json
+bin/
+obj/
+.vscode/
+.idea/
+*.log
+*.swp
+*.swo
+*~
+.oryx_prod_node_modules/
