@@ -38,16 +38,20 @@ module.exports = async function (context, req) {
       headers: {
         "Content-Type": "application/json"
       },
-      body: { error: err.message }
+      body: {
+        error: err.message,
+        details: err.details
+      }
     };
   }
 };
 
 async function getSessionToken() {
-  const sessionToken = env("GPS_SESSION_TOKEN", "GPS_TOKEN", "GPS_Token");
+  const mixedCaseToken = env("GPS_Token");
   const username = env("GPS_USERNAME", "GPS_Username");
   const password = env("GPS_PASSWORD", "GPS_Password");
-  const appToken = env("GPS_APP_TOKEN", "GPS_App_Token");
+  const appToken = env("GPS_APP_TOKEN", "GPS_App_Token") || (username ? mixedCaseToken : "");
+  const sessionToken = env("GPS_SESSION_TOKEN", "GPS_TOKEN") || (!username ? mixedCaseToken : "");
 
   if (username && (password || appToken)) {
     return login(username, { password, appToken });
