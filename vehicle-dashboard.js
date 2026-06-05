@@ -1,20 +1,19 @@
 (() => {
     const REFRESH_MS = 5 * 60 * 1000;
     const CLOCK_MS = 1000;
+    const AUTO_SCROLL_MS = 90;
+    const AUTO_SCROLL_STEP = 1;
+    const AUTO_SCROLL_PAUSE_MS = 3500;
     const PARKED_CUSTOMER_LOOKUP_MS = 3 * 60 * 1000;
-    const MAP_BOUNDS = {
-        north: 37.25,
-        south: 34.85,
-        west: -90.35,
-        east: -84.9
-    };
 
     let state = {
         root: null,
         refreshButton: null,
         clock: null,
         refreshTimer: 0,
-        clockTimer: 0
+        clockTimer: 0,
+        scrollTimer: 0,
+        scrollPausedUntil: 0
     };
 
     function mount({ root, refreshButton, clock }) {
@@ -49,6 +48,7 @@
     async function fetchVehicles() {
         if (!state.root) return;
 
+        stopAutoScroll();
         setLoading(true);
         state.root.innerHTML = '<div class="dashboard-status">Loading vehicle data...</div>';
 
@@ -60,9 +60,13 @@
                 throw new Error(data.error || `API Error: ${response.status} ${response.statusText}`);
             }
 
-            const vehicles = normalizeVehicles(data.vehicles).map(normalizeVehicle);
+            const vehicles = normalizeVehicles(data.vehicles)
+                .map(normalizeVehicle)
+                .filter(hasMovementToday);
+
             await hydrateParkedCustomerMatches(vehicles);
             renderVehicles(vehicles, data.updatedAt);
+            startAutoScrollIfNeeded();
         } catch (error) {
             state.root.innerHTML = `<div class="dashboard-error">Error loading vehicles: ${escapeHtml(error.message)}</div>`;
         } finally {
@@ -92,7 +96,7 @@
         const fixTimeValue = firstValue(vehicle.fix_time_gmt, vehicle.fix_time, vehicle.last_checkin_time, vehicle.lastCheckIn);
         const fixTime = parseDate(fixTimeValue);
         const motion = getMotionState(vehicle, speed);
-        const parkedForMs = getParkedForMs(vehicle, motion, fixTime);
+        const parkedForMs = getParkedForMs(vehicle, motion);
         const driverName = getDriverName(vehicle);
 
         return {
@@ -124,16 +128,12 @@
         return Number.isFinite(speed) && speed <= 1 ? 'stopped' : 'unknown';
     }
 
-    function getParkedForMs(vehicle, motion, fixTime) {
+    function getParkedForMs(vehicle, motion) {
         const speedLabel = String(firstValue(vehicle.speed_label, vehicle.status, '')).toLowerCase();
         const parsed = parseDurationFromLabel(speedLabel);
 
         if (parsed !== null) return parsed;
-        if ((motion === 'stopped' || motion === 'idle') && fixTime) {
-            return Math.max(0, Date.now() - fixTime.getTime());
-        }
-
-        return 0;
+        return motion === 'stopped' || motion === 'idle' ? 0 : 0;
     }
 
     function parseDurationFromLabel(label) {
@@ -148,6 +148,19 @@
         if (unit.startsWith('day')) return amount * 24 * 60 * 60 * 1000;
 
         return null;
+    }
+
+    function hasMovementToday(vehicle) {
+        if (!vehicle.fixTime) return false;
+
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
+
+        if (vehicle.fixTime < startOfToday) return false;
+        if (vehicle.motion === 'moving') return true;
+        if (!vehicle.parkedForMs) return true;
+
+        return vehicle.parkedForMs < Date.now() - startOfToday.getTime();
     }
 
     async function hydrateParkedCustomerMatches(vehicles) {
@@ -172,62 +185,61 @@
 
     function renderVehicles(vehicles, updatedAt) {
         if (vehicles.length === 0) {
-            state.root.innerHTML = '<div class="empty-state">No vehicles found</div>';
+            state.root.innerHTML = '<div class="empty-state">No trucks have movement data from today.</div>';
             return;
         }
 
         const updated = parseDate(updatedAt) || new Date();
-        const cards = vehicles
+        const rows = vehicles
             .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
-            .map(createVehicleCard)
+            .map(createVehicleRow)
             .join('');
 
         state.root.innerHTML = `
-            <div class="dashboard-meta">Last data refresh: ${escapeHtml(updated.toLocaleTimeString())}</div>
-            <div class="vehicle-grid">${cards}</div>
+            <div class="dashboard-meta">
+                <span>${vehicles.length} active today</span>
+                <span>Last data refresh: ${escapeHtml(updated.toLocaleTimeString())}</span>
+            </div>
+            <div class="vehicle-board">${rows}</div>
         `;
     }
 
-    function createVehicleCard(vehicle) {
+    function createVehicleRow(vehicle) {
         const motionLabel = getMotionLabel(vehicle.motion);
-        const speedText = Number.isFinite(vehicle.speed) ? `${Math.round(vehicle.speed)} mph` : 'Speed unavailable';
+        const speedText = Number.isFinite(vehicle.speed) ? `${Math.round(vehicle.speed)} mph` : 'Unavailable';
         const checkInText = vehicle.fixTime ? vehicle.fixTime.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : 'Unavailable';
-        const parkedText = vehicle.parkedForMs > 0 ? formatDuration(vehicle.parkedForMs) : vehicle.speedLabel || 'Unavailable';
+        const parkedText = vehicle.parkedForMs > 0 ? formatDuration(vehicle.parkedForMs) : vehicle.speedLabel || 'Active today';
         const customerText = getCustomerText(vehicle);
         const driverText = vehicle.driverName || 'Unassigned';
 
         return `
-            <article class="vehicle-card">
-                <div class="vehicle-card-header">
-                    <h2 class="vehicle-name">${escapeHtml(vehicle.name)}</h2>
+            <article class="vehicle-row">
+                <div class="vehicle-identity">
+                    <div class="vehicle-name">${escapeHtml(vehicle.name)}</div>
                     <span class="motion-pill motion-${vehicle.motion}">${escapeHtml(motionLabel)}</span>
                 </div>
-                <div class="vehicle-summary">
-                    <div class="info-item">
-                        <div class="info-label">Technician</div>
-                        <div class="info-value">${escapeHtml(driverText)}</div>
-                    </div>
-                    <div class="info-item">
-                        <div class="info-label">Speed</div>
-                        <div class="info-value">${escapeHtml(speedText)}</div>
-                    </div>
+                <div class="row-field technician-field">
+                    <div class="info-label">Technician</div>
+                    <div class="info-value">${escapeHtml(driverText)}</div>
                 </div>
-                <div class="map-frame" aria-label="Approximate Middle Tennessee vehicle location">
-                    ${createMapSvg(vehicle)}
+                <div class="row-field">
+                    <div class="info-label">Speed</div>
+                    <div class="info-value">${escapeHtml(speedText)}</div>
                 </div>
-                <div class="vehicle-footer">
-                    <div class="info-item">
-                        <div class="info-label">Last Check-In</div>
-                        <div class="info-value">${escapeHtml(checkInText)}</div>
-                    </div>
-                    <div class="info-item">
-                        <div class="info-label">Parked / Idle</div>
-                        <div class="info-value">${escapeHtml(parkedText)}</div>
-                    </div>
-                    <div class="customer-slot">
-                        <div class="info-label">Customer Match</div>
-                        <div class="info-value">${escapeHtml(customerText)}</div>
-                    </div>
+                <div class="row-field">
+                    <div class="info-label">Last Check-In</div>
+                    <div class="info-value">${escapeHtml(checkInText)}</div>
+                </div>
+                <div class="row-field">
+                    <div class="info-label">Parked / Idle</div>
+                    <div class="info-value">${escapeHtml(parkedText)}</div>
+                </div>
+                <div class="row-field customer-field">
+                    <div class="info-label">Customer Match</div>
+                    <div class="info-value">${escapeHtml(customerText)}</div>
+                </div>
+                <div class="map-frame" aria-label="Approximate vehicle location">
+                    ${createMapImage(vehicle)}
                 </div>
             </article>
         `;
@@ -254,41 +266,43 @@
         );
     }
 
-    function createMapSvg(vehicle) {
-        const marker = project(vehicle.latitude, vehicle.longitude);
-        const markerSvg = marker ? `
-            <circle class="truck-marker-ring" cx="${marker.x}" cy="${marker.y}" r="15"></circle>
-            <circle class="truck-marker" cx="${marker.x}" cy="${marker.y}" r="6"></circle>
-        ` : '';
+    function createMapImage(vehicle) {
+        if (!hasLocation(vehicle)) {
+            return '<div class="map-unavailable">Map unavailable</div>';
+        }
 
-        return `
-            <svg viewBox="0 0 320 180" role="img" aria-hidden="true">
-                <rect width="320" height="180" fill="#dce9e5"></rect>
-                <path d="M0 118 C46 108 80 102 122 101 C170 100 216 93 320 82" class="road road-major"></path>
-                <path d="M150 0 C156 35 158 74 155 104 C152 132 148 158 142 180" class="road road-major"></path>
-                <path d="M190 180 C184 145 176 126 155 104 C132 80 118 56 92 0" class="road road-major"></path>
-                <path d="M0 80 C46 78 96 82 155 104 C205 122 252 129 320 126" class="road road-secondary"></path>
-                <path d="M62 180 C82 150 104 128 155 104 C214 76 252 42 286 0" class="road road-secondary"></path>
-                <circle cx="155" cy="104" r="4" fill="#405b55"></circle>
-                <text x="164" y="102" class="map-label">Nashville</text>
-                <text x="42" y="113" class="road-label">I-40</text>
-                <text x="160" y="48" class="road-label">I-65</text>
-                <text x="184" y="144" class="road-label">I-24</text>
-                ${markerSvg}
-            </svg>
-        `;
+        const lat = vehicle.latitude.toFixed(5);
+        const lon = vehicle.longitude.toFixed(5);
+        const src = `https://staticmap.openstreetmap.de/staticmap.php?center=${lat},${lon}&zoom=10&size=300x126&maptype=mapnik&markers=${lat},${lon},red-pushpin`;
+
+        return `<img src="${src}" alt="Approximate location for truck ${escapeHtml(vehicle.name)}" loading="lazy" referrerpolicy="no-referrer">`;
     }
 
-    function project(latitude, longitude) {
-        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+    function startAutoScrollIfNeeded() {
+        if (!state.root || state.root.scrollHeight <= state.root.clientHeight + 4) return;
 
-        const x = ((longitude - MAP_BOUNDS.west) / (MAP_BOUNDS.east - MAP_BOUNDS.west)) * 320;
-        const y = ((MAP_BOUNDS.north - latitude) / (MAP_BOUNDS.north - MAP_BOUNDS.south)) * 180;
+        state.scrollPausedUntil = Date.now() + AUTO_SCROLL_PAUSE_MS;
+        state.scrollTimer = window.setInterval(() => {
+            if (!state.root || Date.now() < state.scrollPausedUntil) return;
 
-        return {
-            x: Math.max(8, Math.min(312, x)),
-            y: Math.max(8, Math.min(172, y))
-        };
+            const maxScroll = state.root.scrollHeight - state.root.clientHeight;
+            if (state.root.scrollTop >= maxScroll - 2) {
+                state.root.scrollTop = 0;
+                state.scrollPausedUntil = Date.now() + AUTO_SCROLL_PAUSE_MS;
+                return;
+            }
+
+            state.root.scrollTop += AUTO_SCROLL_STEP;
+        }, AUTO_SCROLL_MS);
+    }
+
+    function stopAutoScroll() {
+        if (state.scrollTimer) {
+            window.clearInterval(state.scrollTimer);
+            state.scrollTimer = 0;
+        }
+
+        if (state.root) state.root.scrollTop = 0;
     }
 
     function getDriverName(vehicle) {
@@ -297,8 +311,13 @@
             vehicle.driver_name,
             vehicle.driverName,
             vehicle.driver_full_name,
+            vehicle.driverFullName,
+            vehicle.driver_first_name && vehicle.driver_last_name ? `${vehicle.driver_first_name} ${vehicle.driver_last_name}` : '',
+            driver.full_name,
+            driver.fullName,
             driver.name,
-            [driver.first_name, driver.last_name].filter(Boolean).join(' '),
+            driver.first_name && driver.last_name ? `${driver.first_name} ${driver.last_name}` : '',
+            driver.firstName && driver.lastName ? `${driver.firstName} ${driver.lastName}` : '',
             vehicle.driver_id,
             driver.id,
             ''
