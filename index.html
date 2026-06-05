@@ -198,39 +198,15 @@
         <div id="vehicleContainer"></div>
     </div>
 
-    <script src="config.js"></script>
     <script>
         const API_BASE_URL = 'https://api.gpsinsight.com/v2';
         
-        // Get credentials from environment or window object
-        // In Azure App Service, these will be available via backend/config
-        let credentials = {
-            username: null,
-            password: null,
-            token: null
+        // GPS Insight Credentials
+        const credentials = {
+            token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1lIjoic2Vjb25kbmF0dXJlbGNncHMiLCJBY2NvdW50SWQiOiI3MzU1IiwiQWN0aXZlIjp0cnVlLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9oYXNoIjoiZjA5MDU4MjJmYzBhY2NlZTI0MzQxNTc5YzBkMDlmMTUiLCJodHRwOi8vc2NoZW1hcy5taWNyb3NvZnQuY29tL3dzLzIwMDgvMDYvaWRlbnRpdHkvY2xhaW1zL3JvbGUiOiJBZG1pbiIsIm5iZiI6MTcxNzYwMDAwMCwiZXhwIjoxNzQ5MTM2MDAwLCJpYXQiOjE3MTc2MDAwMDB9.d8LyRiLqR3LqR3LqR3LqR3LqR3LqR3LqR3LqR3LqR3L',
+            username: 'secondnaturelcgps',
+            password: 'PreAmp12ax72!!'
         };
-
-        // Function to fetch credentials from server endpoint (recommended for Azure)
-        async function fetchCredentials() {
-            try {
-                const response = await fetch('/api/credentials');
-                if (response.ok) {
-                    credentials = await response.json();
-                    return true;
-                }
-            } catch (e) {
-                console.log('Credentials endpoint not available, will use injected values');
-            }
-            
-            // Fallback: credentials should be injected by backend
-            // For development, you can set them via window object
-            if (window.gpsCredentials) {
-                credentials = window.gpsCredentials;
-                return true;
-            }
-            
-            return false;
-        }
 
         async function fetchVehicles() {
             const loadingContainer = document.getElementById('loadingContainer');
@@ -244,13 +220,8 @@
             refreshBtn.disabled = true;
 
             try {
-                // Ensure we have credentials
                 if (!credentials.token) {
-                    await fetchCredentials();
-                }
-
-                if (!credentials.token) {
-                    throw new Error('GPS Insight credentials not configured. Please set environment variables GPS_Token, GPS_Username, and GPS_Password.');
+                    throw new Error('GPS Insight credentials not configured.');
                 }
 
                 // Fetch vehicles from GPS Insight API
@@ -295,7 +266,6 @@
 
         async function fetchVehicleDetails(vehicle) {
             try {
-                // Fetch vehicle location and driver info
                 const response = await fetch(`${API_BASE_URL}/vehicles/${vehicle.id}`, {
                     method: 'GET',
                     headers: {
