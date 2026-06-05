@@ -137,7 +137,7 @@
     }
 
     function parseDurationFromLabel(label) {
-        const match = label.match(/(?:stopped|stop|parked|idle)\s+(?:for\s+)?(\d+)\s*(min|mins|minute|minutes|hr|hrs|hour|hours|day|days)/i);
+        const match = label.match(/(?:idle\s+stop|stopped|stop|parked|idle)\s+(?:for\s+)?(\d+)\s*(min|mins|minute|minutes|hr|hrs|hour|hours|day|days)/i);
         if (!match) return null;
 
         const amount = Number(match[1]);
