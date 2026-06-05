@@ -1,17 +1,6 @@
 {
-  "name": "secondnature-signage-api",
-  "version": "1.0.0",
-  "description": "Azure Functions for Second Nature Signage",
-  "main": "index.js",
-  "scripts": {
-    "start": "func start",
-    "test": "echo \"Error: no test specified\" && exit 1"
+  "engines": {
+    "node": "20"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "dependencies": {
-    "azure-functions-core-tools": "^4.0.0"
-  },
-  "devDependencies": {}
+  "dependencies": {}
 }
