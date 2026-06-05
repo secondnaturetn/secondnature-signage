@@ -9,12 +9,13 @@ module.exports = async function (context, req) {
     return;
   }
 
-  const GPS_BASE = "https://api.gpsinsight.com";
+  const GPS_BASE = "https://api.gpsinsight.com/v2";
+  const url = new URL(`${GPS_BASE}/vehicle/location`);
+  url.searchParams.set("session_token", GPS_TOKEN);
 
   try {
-    const response = await fetch(`${GPS_BASE}/v2/vehicle`, {
+    const response = await fetch(url, {
       headers: {
-        Authorization: `Bearer ${GPS_TOKEN}`,
         Accept: "application/json"
       }
     });
@@ -28,19 +29,22 @@ module.exports = async function (context, req) {
       details = text;
     }
 
+    const isGpsError = details?.head?.status === "ERROR";
+    const status = response.ok && isGpsError ? 502 : response.status;
+
     context.res = {
-      status: response.status,
+      status,
       headers: {
         "Content-Type": "application/json"
       },
-      body: response.ok
+      body: response.ok && !isGpsError
         ? {
             updatedAt: new Date().toISOString(),
             vehicles: details
           }
         : {
             error: "GPS Insight request failed",
-            status: response.status,
+            status,
             details
           }
     };
