@@ -12,5 +12,6 @@
   "license": "ISC",
   "dependencies": {
     "azure-functions-core-tools": "^4.0.0"
-  }
+  },
+  "devDependencies": {}
 }
